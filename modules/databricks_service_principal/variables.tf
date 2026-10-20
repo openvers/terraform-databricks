@@ -17,3 +17,10 @@ variable "display_name" {
     error_message = "display_name must be nonempty, without surrounding whitespace or tab/newline characters."
   }
 }
+
+variable "permanently_delete_on_destroy" {
+  type        = bool
+  description = "Permanently delete the service principal on destroy instead of deactivating it."
+  default     = false
+  nullable    = false
+}

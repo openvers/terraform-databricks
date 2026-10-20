@@ -27,5 +27,5 @@ resource "databricks_service_principal" "this" {
   provider = databricks.accounts
 
   display_name             = var.display_name
-  disable_as_user_deletion = true
+  disable_as_user_deletion = !var.permanently_delete_on_destroy
 }
