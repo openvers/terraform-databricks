@@ -16,6 +16,7 @@ variable "secret_name" {
 variable "secret_data" {
   type        = string
   description = "Databricks Secret Data"
+  sensitive   = true
 }
 
 ## ---------------------------------------------------------------------------------------------------------------------

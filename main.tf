@@ -22,8 +22,13 @@ locals {
     {
       for name, group in module.databricks_account_group :
       name => group.databricks_group_name
-    }
+    },
+    var.databricks_existing_groups
   )
+
+  databricks_secrets_by_name = {
+    for secret in var.databricks_secrets : secret.secret_name => secret.secret_value
+  }
 }
 
 
@@ -39,8 +44,26 @@ locals {
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_secret_scope" {
   source = "./modules/databricks_secret_scope"
+  count  = var.manage_secret_scope ? 1 : 0
 
   secret_scope = var.databricks_secret_scope
+
+  providers = {
+    databricks.workspace = databricks.workspace
+  }
+}
+
+module "databricks_secret" {
+  source = "./modules/databricks_secret"
+
+  # Only names are declassified; secret values remain sensitive.
+  for_each = var.manage_databricks_secrets ? nonsensitive(toset([
+    for secret in var.databricks_secrets : secret.secret_name
+  ])) : toset([])
+
+  secret_name     = each.key
+  secret_data     = local.databricks_secrets_by_name[each.key]
+  secret_scope_id = var.manage_secret_scope ? module.databricks_secret_scope[0].databricks_secret_scope_id : var.databricks_secret_scope
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -56,6 +79,7 @@ module "databricks_secret_scope" {
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_workspace_access_token" {
   source = "./modules/databricks_pat_token"
+  count  = var.create_databricks_access_token ? 1 : 0
 
   providers = {
     databricks.workspace = databricks.workspace

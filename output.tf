@@ -1,12 +1,12 @@
 output "databricks_access_token" {
-  description = "Databricks Workspace Service Principal Access Token"
-  value       = module.databricks_workspace_access_token.databricks_token
+  description = "Databricks workspace PAT, or null when token creation is disabled."
+  value       = var.create_databricks_access_token ? module.databricks_workspace_access_token[0].databricks_token : null
   sensitive   = true
 }
 
 output "databricks_secret_scope_name" {
-  description = "Databricks Workspace Secret Scope Name"
-  value       = module.databricks_secret_scope.databricks_secret_scope
+  description = "Configured Databricks secret scope name, whether managed or externally owned."
+  value       = var.manage_secret_scope ? module.databricks_secret_scope[0].databricks_secret_scope : var.databricks_secret_scope
 }
 
 output "databricks_cluster_ids" {

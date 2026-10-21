@@ -155,6 +155,14 @@ variable "databricks_clusters" {
     ])), false)
     error_message = "Cluster library_paths artifact must be non-null and nonblank."
   }
+
+  validation {
+    condition = try(alltrue([
+      for cluster in values(var.databricks_clusters) :
+      contains(concat(keys(var.databricks_workspace_groups), keys(var.databricks_existing_groups)), cluster.policy.group)
+    ]), false)
+    error_message = "Every cluster policy.group must reference a key in databricks_workspace_groups or databricks_existing_groups."
+  }
 }
 
 variable "manage_artifact_allowlists" {
@@ -282,20 +290,86 @@ variable "databricks_workspace_groups" {
   }
 }
 
+variable "databricks_existing_groups" {
+  description = "Reference-only map of logical group keys to existing Databricks display names. No identity, membership, assignment, entitlement, or lookup is managed. An external owner must ensure workspace availability and readiness before use."
+  type        = map(string)
+  default     = {}
+  nullable    = false
+
+  validation {
+    condition = try(alltrue([
+      for key, name in var.databricks_existing_groups :
+      trimspace(key) != "" && trimspace(name) != "" && name == trimspace(name)
+    ]), false)
+    error_message = "Existing group keys must be nonblank, and display names must be non-null, nonblank, and unpadded."
+  }
+
+  validation {
+    condition     = length(setintersection(toset(keys(var.databricks_existing_groups)), toset(keys(var.databricks_workspace_groups)))) == 0
+    error_message = "Existing group logical keys must not overlap keys in databricks_workspace_groups."
+  }
+
+  validation {
+    condition     = length(setintersection(toset(values(var.databricks_existing_groups)), toset(keys(var.databricks_workspace_groups)))) == 0
+    error_message = "Existing group display names must not overlap keys in databricks_workspace_groups."
+  }
+}
+
+variable "manage_secret_scope" {
+  description = "Whether this root manages the secret scope. When false, an external owner must ensure the configured scope exists and is ready. Disabling a previously managed scope can destroy it and its secrets; this flag does not transfer ownership or migrate state."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "manage_databricks_secrets" {
+  description = "Explicit opt-in for this root to write and manage databricks_secrets in the configured scope, including an externally owned scope. Disabling previously managed secret writes can destroy those secrets; this flag does not transfer ownership or migrate state."
+  type        = bool
+  default     = false
+  nullable    = false
+}
+
+variable "create_databricks_access_token" {
+  description = "Whether this root creates and manages a Databricks access token. Disabling a previously managed token can revoke it; this flag does not transfer ownership or migrate state."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
 variable "databricks_secret_scope" {
   type        = string
-  description = "Databricks Secret Scope Name"
+  description = "Databricks secret scope name, managed here or provided by an external owner according to manage_secret_scope."
   default     = "example_secret_scope"
+  nullable    = false
+
+  validation {
+    condition     = try(trimspace(var.databricks_secret_scope) != "" && var.databricks_secret_scope == trimspace(var.databricks_secret_scope), false)
+    error_message = "databricks_secret_scope must be non-null, nonblank, and unpadded."
+  }
 }
 
 variable "databricks_secrets" {
-  description = "Map of Databricks Secrets"
+  description = "Secrets written only when manage_databricks_secrets is explicitly enabled. Secret names must be unique and known at plan time; names are exposed in resource addresses while secret values remain sensitive."
   default     = []
   sensitive   = true
+  nullable    = false
   type = list(object({
     secret_name  = string
     secret_value = string
   }))
+
+  validation {
+    condition = try(alltrue([
+      for secret in var.databricks_secrets :
+      trimspace(secret.secret_name) != "" && secret.secret_name == trimspace(secret.secret_name) && secret.secret_value != null
+    ]), false)
+    error_message = "Secret names must be non-null, nonblank, and unpadded, and secret values must not be null."
+  }
+
+  validation {
+    condition     = try(length(distinct([for secret in var.databricks_secrets : secret.secret_name])) == length(var.databricks_secrets), false)
+    error_message = "Secret names must be unique."
+  }
 }
 
 variable "databricks_instance_pools" {
