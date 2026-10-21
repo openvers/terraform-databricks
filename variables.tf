@@ -83,7 +83,7 @@ variable "databricks_catalog_config" {
 ## ---------------------------------------------------------------------------------------------------------------------
 
 variable "databricks_clusters" {
-  description = "Clusters keyed by cluster name, each with an independent policy."
+  description = "Clusters keyed by cluster name, each with an independent policy. library_paths contribute to complete metastore-scoped artifact allowlists; use plan-known configured names for artifact paths, not resource IDs."
   type = map(object({
     policy = object({
       group                   = string
@@ -127,6 +127,84 @@ variable "databricks_clusters" {
   }))
   default  = {}
   nullable = false
+
+  validation {
+    condition = try(alltrue(flatten([
+      for cluster in values(var.databricks_clusters) : [
+        for matcher in values(cluster.library_paths) :
+        contains(["INIT_SCRIPT", "LIBRARY_JAR", "LIBRARY_MAVEN"], matcher.artifact_type)
+      ]
+    ])), false)
+    error_message = "Cluster library_paths artifact_type must be INIT_SCRIPT, LIBRARY_JAR, or LIBRARY_MAVEN."
+  }
+
+  validation {
+    condition = try(alltrue(flatten([
+      for cluster in values(var.databricks_clusters) : [
+        for matcher in values(cluster.library_paths) : matcher.match_type == "PREFIX_MATCH"
+      ]
+    ])), false)
+    error_message = "Cluster library_paths match_type must be PREFIX_MATCH."
+  }
+
+  validation {
+    condition = try(alltrue(flatten([
+      for cluster in values(var.databricks_clusters) : [
+        for matcher in values(cluster.library_paths) : trimspace(matcher.artifact) != ""
+      ]
+    ])), false)
+    error_message = "Cluster library_paths artifact must be non-null and nonblank."
+  }
+}
+
+variable "manage_artifact_allowlists" {
+  description = "Whether this root owns complete metastore-scoped allowlists for the configured artifact types. When false, an external owner must provide all required matchers and ensure readiness before clusters are applied. Changing this flag does not automatically migrate ownership or existing state."
+  type        = bool
+  default     = true
+  nullable    = false
+}
+
+variable "databricks_artifact_allowlists" {
+  description = "Additional matchers keyed by artifact type, merged with cluster library_paths into the complete metastore-scoped allowlist for each type, including all consumers. Use plan-known configured names for artifact paths, not resource IDs. No cross-root coordination or automatic ownership migration is performed."
+  type = map(set(object({
+    artifact   = string
+    match_type = string
+  })))
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([
+      for artifact_type in keys(var.databricks_artifact_allowlists) :
+      contains(["INIT_SCRIPT", "LIBRARY_JAR", "LIBRARY_MAVEN"], artifact_type)
+    ])
+    error_message = "Additional artifact allowlist keys must be INIT_SCRIPT, LIBRARY_JAR, or LIBRARY_MAVEN."
+  }
+
+  validation {
+    condition = alltrue([
+      for matchers in values(var.databricks_artifact_allowlists) : try(length(matchers) > 0, false)
+    ])
+    error_message = "Each additional artifact allowlist must contain a nonempty, non-null matcher set."
+  }
+
+  validation {
+    condition = try(alltrue(flatten([
+      for matchers in values(var.databricks_artifact_allowlists) : [
+        for matcher in matchers : matcher.match_type == "PREFIX_MATCH"
+      ]
+    ])), false)
+    error_message = "Additional artifact allowlist match_type must be PREFIX_MATCH."
+  }
+
+  validation {
+    condition = try(alltrue(flatten([
+      for matchers in values(var.databricks_artifact_allowlists) : [
+        for matcher in matchers : trimspace(matcher.artifact) != ""
+      ]
+    ])), false)
+    error_message = "Additional artifact allowlist artifact must be non-null and nonblank."
+  }
 }
 
 variable "databricks_sql_warehouses" {

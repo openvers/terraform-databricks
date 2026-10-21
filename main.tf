@@ -200,6 +200,32 @@ module "databricks_catalog_config" {
   }
 }
 
+module "databricks_artifact_allowlists" {
+  source = "./modules/databricks_artifact_allowlists"
+
+  depends_on = [module.databricks_catalog_config]
+
+  artifact_allowlist_requests = concat(
+    flatten([
+      for cluster in values(var.databricks_clusters) : values(cluster.library_paths)
+    ]),
+    flatten([
+      for artifact_type, matchers in var.databricks_artifact_allowlists : [
+        for matcher in matchers : {
+          artifact_type = artifact_type
+          artifact      = matcher.artifact
+          match_type    = matcher.match_type
+        }
+      ]
+    ])
+  )
+  manage_artifact_allowlists = var.manage_artifact_allowlists
+
+  providers = {
+    databricks.workspace = databricks.workspace
+  }
+}
+
 module "databricks_catalog_tables" {
   source = "./modules/databricks_catalog_config/modules/catalog-tables"
 
@@ -237,7 +263,7 @@ module "databricks_cluster" {
   source   = "./modules/databricks_cluster"
   for_each = var.databricks_clusters
 
-  depends_on = [module.databricks_catalog_config]
+  depends_on = [module.databricks_catalog_config, module.databricks_artifact_allowlists]
 
   cluster_name            = each.key
   node_instance_pool_id   = module.databricks_instance_pool["node"].instance_pool_id
@@ -249,7 +275,7 @@ module "databricks_cluster" {
   num_workers_min = each.value.num_workers_min
   num_workers_max = each.value.num_workers_max
 
-  library_paths = each.value.library_paths
+  library_paths = {}
   jar_libraries = each.value.jar_libraries
   whl_libraries = each.value.whl_libraries
 
