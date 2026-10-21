@@ -1,10 +1,10 @@
 terraform {
-  required_version = ">= 1.2.0"
+  required_version = ">= 1.3.0"
 
   required_providers {
     databricks = {
       source                = "databricks/databricks"
-      configuration_aliases = [databricks.workspace]
+      configuration_aliases = [databricks.workspace, databricks.workspace_target]
     }
   }
 }
@@ -37,35 +37,18 @@ resource "databricks_group" "this" {
         var.allow_instance_pool_create != true &&
         var.allow_databricks_sql_access != true
       )
-      error_message = "account_group=true cannot enable workspace entitlements. Leave all entitlement flags false or null and manage entitlements separately through the workspace provider."
+      error_message = "account_group=true cannot enable inline workspace entitlements. Leave all legacy entitlement flags false or null and use workspace_entitlements through the workspace provider."
     }
 
     precondition {
-      condition     = length(var.member_ids) == 0 || length(var.members) == 0
-      error_message = "Use either members or member_ids, not both. Migrating existing memberships requires explicit state moves from counted to keyed resource addresses."
+      condition     = var.account_group || var.workspace_entitlements == null
+      error_message = "workspace_entitlements requires account_group=true. Workspace-local groups must use the inline entitlement flags instead."
     }
   }
 }
 
 ## ---------------------------------------------------------------------------------------------------------------------
 ## DATABRICKS GROUP MEMBER RESOURCE
-##
-## Adds a member to a Databricks group. The member can be either a user or a service principal.
-##
-## Parameters:
-## - `group_id`: The ID of the Databricks group.
-## - `member_id`: The ID of the member to add to the group.
-## ---------------------------------------------------------------------------------------------------------------------
-resource "databricks_group_member" "this" {
-  provider = databricks.workspace
-  count    = length(var.member_ids)
-
-  group_id  = databricks_group.this.id
-  member_id = var.member_ids[count.index]
-}
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS KEYED GROUP MEMBER RESOURCE
 ##
 ## Adds Databricks identities to the group using stable logical membership keys and potentially computed member IDs.
 ## Existing counted memberships remain unchanged unless the caller explicitly migrates their state addresses.
@@ -74,10 +57,48 @@ resource "databricks_group_member" "this" {
 ## - `group_id`: Databricks ID of the group created by this module.
 ## - `member_id`: Databricks SCIM ID of the user, service principal or nested group to add.
 ## ---------------------------------------------------------------------------------------------------------------------
-resource "databricks_group_member" "keyed" {
+resource "databricks_group_member" "this" {
   provider = databricks.workspace
   for_each = var.members
 
   group_id  = databricks_group.this.id
   member_id = each.value
+}
+
+resource "databricks_mws_permission_assignment" "this" {
+  provider = databricks.workspace
+  for_each = var.workspace_assignments
+
+  workspace_id = each.value.workspace_id
+  principal_id = tonumber(databricks_group.this.id)
+  permissions  = [each.value.permission]
+
+  lifecycle {
+    precondition {
+      condition     = var.account_group
+      error_message = "Workspace assignments require an account-level group."
+    }
+  }
+}
+
+# Resolve the workspace-visible group only after any managed account assignments finish.
+# The target workspace may instead have an assignment managed outside this module.
+data "databricks_group" "workspace_target" {
+  provider = databricks.workspace_target
+  count    = var.workspace_entitlements == null ? 0 : 1
+
+  display_name = databricks_group.this.display_name
+
+  depends_on = [databricks_mws_permission_assignment.this]
+}
+
+resource "databricks_entitlements" "this" {
+  provider = databricks.workspace_target
+  count    = var.workspace_entitlements == null ? 0 : 1
+
+  group_id                   = data.databricks_group.workspace_target[count.index].id
+  workspace_access           = try(var.workspace_entitlements.workspace_access, false)
+  databricks_sql_access      = try(var.workspace_entitlements.databricks_sql_access, false)
+  allow_cluster_create       = try(var.workspace_entitlements.allow_cluster_create, false)
+  allow_instance_pool_create = try(var.workspace_entitlements.allow_instance_pool_create, false)
 }

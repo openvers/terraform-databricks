@@ -2,7 +2,7 @@ terraform {
   required_providers {
     databricks = {
       source = "databricks/databricks"
-      configuration_aliases = [ 
+      configuration_aliases = [
         databricks.workspace,
       ]
     }
@@ -24,9 +24,9 @@ resource "databricks_catalog" "this" {
   provider = databricks.workspace
   for_each = tomap({ for t in coalesce(var.databricks_catalogs, []) : "${t.name}" => t })
 
-  name         = each.value.name
-  comment      = each.value.comment
-  properties   = each.value.properties
+  name       = each.value.name
+  comment    = each.value.comment
+  properties = each.value.properties
 }
 
 
@@ -43,9 +43,9 @@ resource "databricks_catalog" "this" {
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_schema" "this" {
   provider   = databricks.workspace
-  depends_on = [ databricks_catalog.this ]
+  depends_on = [databricks_catalog.this]
   for_each   = tomap({ for t in coalesce(var.databricks_schemas, []) : "${t.schema_name}" => t })
-  
+
   catalog_name = each.value.catalog_name
   name         = each.value.schema_name
   comment      = each.value.comment
@@ -67,14 +67,18 @@ resource "databricks_schema" "this" {
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_volume" "this" {
   provider   = databricks.workspace
-  depends_on = [ databricks_schema.this ]
-  for_each = tomap({ for t in coalesce(var.databricks_volumes, []) : "${t.volume_name}" => t })
-  
+  depends_on = [databricks_schema.this]
+  for_each   = tomap({ for t in coalesce(var.databricks_volumes, []) : "${t.volume_name}" => t })
+
   catalog_name     = each.value.catalog_name
   schema_name      = each.value.schema_name
   name             = each.value.volume_name
   volume_type      = each.value.volume_type
-  storage_location = "${each.value.storage_location}/volumes/${each.value.volume_name}"
+  storage_location = each.value.volume_type == "MANAGED" ? null : (
+    each.value.storage_path != null
+    ? each.value.storage_path
+    : "${each.value.storage_location}/volumes/${each.value.volume_name}"
+  )
   comment          = each.value.comment
 }
 
@@ -90,10 +94,10 @@ resource "databricks_volume" "this" {
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_file" "this" {
   provider   = databricks.workspace
-  depends_on = [ databricks_volume.this ]
-  count      = var.databricks_files != null ? length(var.databricks_files): 0
+  depends_on = [databricks_volume.this]
+  count      = var.databricks_files != null ? length(var.databricks_files) : 0
 
-  path         = "/Volumes/${var.databricks_files[count.index].catalog_name}/${var.databricks_files[count.index].schema_name}/${var.databricks_files[count.index].volume_name}/${var.databricks_files[count.index].file_name}"
+  path           = "/Volumes/${var.databricks_files[count.index].catalog_name}/${var.databricks_files[count.index].schema_name}/${var.databricks_files[count.index].volume_name}/${var.databricks_files[count.index].file_name}"
   content_base64 = var.databricks_files[count.index].content_base64
 }
 
@@ -116,7 +120,7 @@ resource "databricks_file" "this" {
 
 resource "databricks_sql_table" "this" {
   provider   = databricks.workspace
-  depends_on = [ databricks_schema.this ]
+  depends_on = [databricks_schema.this]
   for_each   = tomap({ for t in coalesce(var.databricks_tables, []) : "${t.table_name}" => t })
 
   cluster_id         = each.value.cluster_id

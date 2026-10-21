@@ -10,21 +10,33 @@ output "databricks_secret_scope_name" {
 }
 
 output "databricks_cluster_ids" {
-  description = "List of Databricks Workspace Cluster IDs"
-  value       = module.databricks_cluster[*].databricks_cluster_id
+  description = "Databricks Workspace Cluster IDs keyed by cluster name."
+  value = {
+    for name, cluster in module.databricks_cluster :
+    name => cluster.databricks_cluster_id
+  }
 }
 
-output "databricks_example_holdings_data_path" {
-  description = "Databricks Example Holding Data Unity Catalog File Path"
-  value       = module.databricks_sample_data.databricks_volume_file_paths[0]
+output "databricks_sql_warehouse_ids" {
+  description = "SQL warehouse IDs keyed by warehouse name."
+
+  value = {
+    for name, warehouse in module.databricks_sql_warehouse :
+    name => warehouse.warehouse_id
+  }
 }
 
-output "databricks_example_weather_data_path" {
-  description = "Databricks Example Weather Data Unity Catalog File Path"
-  value       = module.databricks_sample_data.databricks_volume_file_paths[1]
+output "databricks_unity_catalog_volume_file_paths" {
+  description = "Unity Catalog volume file paths keyed by JSON-encoded [catalog, schema] tuples."
+  value       = module.databricks_catalog_config.databricks_volume_file_paths
+}
+
+output "databricks_sample_data_file_paths" {
+  description = "Optional sample file paths keyed by catalog name, then dataset identity."
+  value       = module.databricks_catalog_config.sample_data_file_paths
 }
 
 output "databricks_unity_catalog_table_paths" {
-  description = "Databricks Unity Catalog Table Paths"
-  value       = module.databricks_sample_tables[*].databricks_schema_table_paths[0]
+  description = "Unity Catalog table paths keyed by JSON-encoded [catalog, schema] tuples."
+  value       = module.databricks_catalog_tables.databricks_schema_table_paths
 }

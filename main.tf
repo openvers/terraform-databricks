@@ -1,90 +1,29 @@
 terraform {
+  required_version = ">= 1.9"
+
   required_providers {
     databricks = {
       source = "databricks/databricks"
-      configuration_aliases = [ 
+      configuration_aliases = [
         databricks.accounts,
-        databricks.workspace 
+        databricks.workspace
       ]
     }
   }
 }
 
+
 locals {
-  databricks_schemas = [
+  databricks_group_names = merge(
     {
-      catalog_name = var.databricks_catalog_name
-      schema_name  = var.databricks_schema_name
-      comment      = "Example Schema Created with Terraform"
-      properties   = {
-        kind = "various"
-      }
+      for name, group in module.databricks_workspace_group :
+      name => group.databricks_group_name
+    },
+    {
+      for name, group in module.databricks_account_group :
+      name => group.databricks_group_name
     }
-  ]
-  
-  databricks_volumes = [
-    {
-      catalog_name     = var.databricks_catalog_name
-      schema_name      = var.databricks_schema_name
-      volume_name      = var.databricks_volume_name
-      volume_type      = "EXTERNAL"
-      storage_location = var.databricks_catalog_external_location_url
-      comment          = "Example Volume Created with Terraform"
-    },
-    {
-      catalog_name     = var.databricks_catalog_name
-      schema_name      = var.databricks_schema_name
-      volume_name      = "Libraries"
-      volume_type      = "EXTERNAL"
-      storage_location = var.databricks_catalog_external_location_url
-      comment          = "Cluster Library Volume Created with Terraform"
-    },
-  ]
-  
-  databricks_files = concat([
-    {
-      catalog_name   = var.databricks_catalog_name
-      schema_name    = var.databricks_schema_name
-      volume_name    = var.databricks_volume_name
-      file_name      = "example_holdings.csv"
-      content_base64 = data.http.sample_holdings_data.response_body_base64
-    },
-    {
-      catalog_name   = var.databricks_catalog_name
-      schema_name    = var.databricks_schema_name
-      volume_name    = var.databricks_volume_name
-      file_name      = "example_weather.csv"
-      content_base64 = data.http.sample_weather_data.response_body_base64
-    },
-  ],
-  [
-    for l in var.databricks_cluster_library_files :
-    {
-      catalog_name   = var.databricks_catalog_name
-      schema_name    = var.databricks_schema_name
-      volume_name    = "Libraries"
-      file_name      = l.file_name
-      content_base64 = l.content_base64
-    }
-  ])
-  
-  databricks_cluster_library_paths = {
-    jar = {
-      artifact = "/Volumes/${var.databricks_catalog_name}/${var.databricks_schema_name}/Libraries"
-      artifact_type = "LIBRARY_JAR"
-      match_type    = "PREFIX_MATCH"
-    }
-  }
-
-  databricks_cluster_jar_libraries = {
-    for l in var.databricks_cluster_library_files :
-    l.file_name => "/Volumes/${var.databricks_catalog_name}/${var.databricks_schema_name}/Libraries/${l.file_name}" if strcontains(l.file_name, ".jar")
-  }
-
-  databricks_cluster_whl_libraries = {
-    for l in var.databricks_cluster_library_files :
-    l.file_name => "/Volumes/${var.databricks_catalog_name}/${var.databricks_schema_name}/Libraries/${l.file_name}" if strcontains(l.file_name, ".whl")
-  }
+  )
 }
 
 
@@ -116,7 +55,7 @@ module "databricks_secret_scope" {
 ## authenticate with the Databricks Workspace via CLI/Curl without needing to pass Service Principal Credentials.
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_workspace_access_token" {
-  source   = "./modules/databricks_pat_token"
+  source = "./modules/databricks_pat_token"
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -133,32 +72,12 @@ module "databricks_workspace_access_token" {
 ## - `instance_pool_name`: Specifies the name of the instance pool
 ## - `instance_pool_max_capacity`: Specifies the maximum capacity of the instance pool
 ## ---------------------------------------------------------------------------------------------------------------------
-module "databricks_instance_pool_driver" {
-  source       = "./modules/databricks_instance_pool"
-  
-  instance_pool_name         = var.databricks_instance_pool_driver_name
-  instance_pool_max_capacity = var.databricks_instance_pool_driver_max_capacity
+module "databricks_instance_pool" {
+  source   = "./modules/databricks_instance_pool"
+  for_each = var.databricks_instance_pools
 
-  providers = {
-    databricks.workspace = databricks.workspace
-  }
-}
-
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS WORKER NODE INSTANCE POOL MODULE
-## 
-## This module creates an instance pool in a Databricks workspace specifically for worker nodes.
-## 
-## Parameters:
-## - `instance_pool_name`: Specifies the name of the instance pool
-## - `instance_pool_max_capacity`: Specifies the maximum capacity of the instance pool
-## ---------------------------------------------------------------------------------------------------------------------
-module "databricks_instance_pool_node" {
-  source       = "./modules/databricks_instance_pool"
-  
-  instance_pool_name         = var.databricks_instance_pool_node_name
-  instance_pool_max_capacity = var.databricks_instance_pool_node_max_capacity
+  instance_pool_name         = each.value.name
+  instance_pool_max_capacity = each.value.max_capacity
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -178,14 +97,62 @@ module "databricks_instance_pool_node" {
 ## - `allow_databricks_sql_access`: Specify whether to allow SQL access to Databricks.
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_workspace_group" {
-  source       = "./modules/databricks_group"
-  
-  group_name                  = var.databricks_workspace_group
-  allow_cluster_create        = true
-  allow_databricks_sql_access = true
+  source = "./modules/databricks_group"
+
+  for_each = {
+    for name, group in var.databricks_workspace_groups :
+    name => group
+    if !group.account_group
+  }
+
+  group_name = each.key
+  members    = each.value.members
+
+  allow_cluster_create = coalesce(
+    each.value.allow_cluster_create, true
+  )
+  allow_instance_pool_create = coalesce(
+    each.value.allow_instance_pool_create, false
+  )
+  allow_databricks_sql_access = coalesce(
+    each.value.allow_databricks_sql_access, true
+  )
 
   providers = {
-    databricks.workspace = databricks.workspace
+    databricks.workspace        = databricks.workspace
+    databricks.workspace_target = databricks.workspace
+  }
+}
+
+
+module "databricks_account_group" {
+  source = "./modules/databricks_group"
+
+  for_each = {
+    for name, group in var.databricks_workspace_groups :
+    name => group
+    if group.account_group
+  }
+
+  account_group          = true
+  group_name             = each.key
+  members                = each.value.members
+  workspace_assignments  = each.value.workspace_assignments
+  workspace_entitlements = each.value.workspace_entitlements
+
+  allow_cluster_create = coalesce(
+    each.value.allow_cluster_create, false
+  )
+  allow_instance_pool_create = coalesce(
+    each.value.allow_instance_pool_create, false
+  )
+  allow_databricks_sql_access = coalesce(
+    each.value.allow_databricks_sql_access, false
+  )
+
+  providers = {
+    databricks.workspace        = databricks.accounts
+    databricks.workspace_target = databricks.workspace
   }
 }
 
@@ -201,22 +168,52 @@ module "databricks_workspace_group" {
 ## - `data_security_mode`: Databrick cluster security mode
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_cluster_policy" {
-  source = "./modules/databricks_cluster_policy"
-  depends_on = [ 
-    module.databricks_instance_pool_node,
-    module.databricks_instance_pool_driver 
+  source   = "./modules/databricks_cluster_policy"
+  for_each = var.databricks_clusters
+
+  depends_on = [
+    module.databricks_instance_pool,
+    module.databricks_account_group
   ]
-  
-  cluster_policy_name           = var.databricks_cluster_policy_name
-  group_name                    = module.databricks_workspace_group.databricks_group_name
-  data_security_mode            = var.databricks_cluster_data_security_mode
-  instance_pool_autotermination = var.databricks_cluster_policy_autotermination_minutes
+
+  cluster_policy_name           = "${each.key}-policy"
+  group_name                    = local.databricks_group_names[each.value.policy.group]
+  group_permission              = each.value.policy.group_permission
+  max_clusters_per_user         = each.value.policy.max_clusters_per_user
+  dbus_per_hour                 = each.value.policy.dbus_per_hour
+  instance_pool_autotermination = each.value.policy.autotermination_minutes
+  data_security_mode            = each.value.policy.data_security_mode
 
   providers = {
     databricks.workspace = databricks.workspace
   }
 }
 
+
+module "databricks_catalog_config" {
+  source = "./modules/databricks_catalog_config/modules/catalog"
+
+  databricks_catalog_config = var.databricks_catalog_config
+
+  providers = {
+    databricks.workspace = databricks.workspace
+  }
+}
+
+module "databricks_catalog_tables" {
+  source = "./modules/databricks_catalog_config/modules/catalog-tables"
+
+  databricks_catalog_config = var.databricks_catalog_config
+  cluster_ids = {
+    for key, cluster in module.databricks_cluster : key => cluster.databricks_cluster_id
+  }
+
+  depends_on = [module.databricks_catalog_config]
+
+  providers = {
+    databricks.workspace = databricks.workspace
+  }
+}
 
 ## ---------------------------------------------------------------------------------------------------------------------
 ## DATABRICKS CLUSTER MODULE
@@ -237,24 +234,29 @@ module "databricks_cluster_policy" {
 ## - `azure_attributes`: Azure compute configurations for Databricks Clusters
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_cluster" {
-  source     = "./modules/databricks_cluster"
-  count      = var.DATABRICKS_CLUSTERS
-  depends_on = [ 
-    module.databricks_cluster_policy,
-    module.databricks_sample_data 
-  ]
-  
-  cluster_name            = "${var.databricks_cluster_name}-${count.index}"
-  node_instance_pool_id   = module.databricks_instance_pool_node.instance_pool_id
-  driver_instance_pool_id = module.databricks_instance_pool_driver.instance_pool_id
-  cluster_policy_name     = module.databricks_cluster_policy.cluster_policy_name
-  cluster_policy_id       = module.databricks_cluster_policy.cluster_policy_id
-  library_paths           = local.databricks_cluster_library_paths
-  jar_libraries           = local.databricks_cluster_jar_libraries
-  whl_libraries           = local.databricks_cluster_whl_libraries
-  spark_env_variable      = var.databricks_cluster_spark_env_variable
-  spark_conf_variable     = var.databricks_cluster_spark_conf_variable
-  azure_attributes        = var.databricks_cluster_azure_attributes
+  source   = "./modules/databricks_cluster"
+  for_each = var.databricks_clusters
+
+  depends_on = [module.databricks_catalog_config]
+
+  cluster_name            = each.key
+  node_instance_pool_id   = module.databricks_instance_pool["node"].instance_pool_id
+  driver_instance_pool_id = module.databricks_instance_pool["driver"].instance_pool_id
+
+  cluster_policy_name = module.databricks_cluster_policy[each.key].cluster_policy_name
+  cluster_policy_id   = module.databricks_cluster_policy[each.key].cluster_policy_id
+
+  num_workers_min = each.value.num_workers_min
+  num_workers_max = each.value.num_workers_max
+
+  library_paths = each.value.library_paths
+  jar_libraries = each.value.jar_libraries
+  whl_libraries = each.value.whl_libraries
+
+  spark_env_variable  = each.value.spark_env_variable
+  spark_conf_variable = each.value.spark_conf_variable
+  azure_attributes    = each.value.azure_attributes
+  aws_attributes      = each.value.aws_attributes
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -262,117 +264,15 @@ module "databricks_cluster" {
 }
 
 
-## ---------------------------------------------------------------------------------------------------------------------
-## HTTP DATA SOURCE
-## 
-## Download contents of sample holdings data to be placed in Databricks Unity Catalog Volume.
-## 
-## Parameters:
-## - `url`: Sample data URL.
-## - `request_headers`: Mapping of HTTP request headers.
-## ---------------------------------------------------------------------------------------------------------------------
-data "http" "sample_holdings_data" {
-  url = "https://duckdb.org/data/holdings.csv"
+module "databricks_sql_warehouse" {
+  source   = "./modules/databricks_sql_warehouse"
+  for_each = var.databricks_sql_warehouses
 
-  # Optional request headers
-  request_headers = {
-    Accept  = "text/csv"
-    Content = "text/csv"
-  }
-}
+  # Wait for root-managed groups, workspace assignments, and entitlements before assigning permissions.
+  depends_on = [module.databricks_workspace_group, module.databricks_account_group]
 
-
-## ---------------------------------------------------------------------------------------------------------------------
-## HTTP DATA SOURCE
-## 
-## Download contents of sample weather data to be placed in Databricks Unity Catalog Volume.
-## 
-## Parameters:
-## - `url`: Sample data URL.
-## - `request_headers`: Mapping of HTTP request headers.
-## ---------------------------------------------------------------------------------------------------------------------
-data "http" "sample_weather_data" {
-  url = "https://duckdb.org/data/weather.csv"
-
-  # Optional request headers
-  request_headers = {
-    Accept  = "text/csv"
-    Content = "text/csv"
-  }
-}
-
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS SAMPLE DATA MODULE
-## 
-## This module sets up sample data for experimentation in Databricks Unity Catalog
-## by establishing UC Schemas/ UC Volumes and file uploads. It also configures the preferred
-## library installation approach uploading cluster library files to install within a
-## dedicated Volume in Unity Catalog.
-## 
-## Parameters:
-## - `databricks_catalog_name`: Databricks Unity Catalog name.
-## - `databricks_schemas`: Map of Databricks Unity Catalog Schema attributes to create.
-## - `databricks_volumes`: Map of Databricks Unity Catalog Volume attributes to create.
-## - `databricks_files`: Map of Databricks files to upload into Unity Catalog Volumes.
-## ---------------------------------------------------------------------------------------------------------------------
-module "databricks_sample_data" {
-  source       = "./modules/databricks_catalog_config"
-  
-  databricks_schemas = local.databricks_schemas
-  databricks_volumes = local.databricks_volumes
-  databricks_files   = local.databricks_files
-
-  providers = {
-    databricks.workspace = databricks.workspace
-  }
-}
-
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS SAMPLE DATA MODULE
-## 
-## This module sets up sample data for experimentation in Databricks Unity Catalog
-## by establishing UC Schemas/ UC Volumes and file uploads. It also configures the preferred
-## library installation approach uploading cluster library files to install within a
-## dedicated Volume in Unity Catalog.
-## 
-## Parameters:
-## - `databricks_tables`: Databricks Unity Catalog Table attributes to create.
-## ---------------------------------------------------------------------------------------------------------------------
-module "databricks_sample_tables" {
-  source     = "./modules/databricks_catalog_config"
-  count      = var.DATABRICKS_CLUSTERS > 0 ? 1 : 0
-  depends_on = [ 
-    module.databricks_sample_data,
-  ]
-
-  databricks_tables = [
-    {
-      cluster_id         = module.databricks_cluster[count.index].databricks_cluster_id
-      catalog_name       = var.databricks_catalog_name
-      schema_name        = var.databricks_schema_name
-      table_name         = "example_weather"
-      table_type         = "EXTERNAL"
-      data_source_format = "DELTA"
-      storage_location   = var.databricks_catalog_external_location_url
-      comment            = "Table created with Terraform"
-      table_columns      = [
-        {
-          name     = "city"
-          type     = "string"
-          comment  = "Name of US City"
-          nullable = false
-        },
-        {
-          name     = "total_precipitation"
-          type     = "float"
-          comment  = "Total accumulation of Rain Water"
-          nullable = false
-        }
-      ]
-    }
-  ]
+  warehouse_name = each.key
+  config         = each.value
 
   providers = {
     databricks.workspace = databricks.workspace

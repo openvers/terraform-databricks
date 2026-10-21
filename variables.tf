@@ -3,19 +3,78 @@
 ## These variables are expected to be passed in by the operator
 ## ---------------------------------------------------------------------------------------------------------------------
 
-variable "databricks_cluster_name" {
-  type        = string
-  description = "Databricks Cluster Name"
-}
+variable "databricks_catalog_config" {
+  description = "Unity Catalog configuration keyed by catalog, schema, volume, file, and table names. File values are base64-encoded content."
+  type = map(object({
+    create     = optional(bool, true)
+    comment    = optional(string)
+    properties = optional(map(string), {})
+    sample_data = optional(object({
+      enabled = optional(bool, false)
+    }), {})
+    schemas = optional(map(object({
+      comment    = optional(string)
+      properties = optional(map(string), {})
+      volumes = optional(map(object({
+        volume_type      = optional(string, "MANAGED")
+        storage_location = optional(string)
+        storage_path     = optional(string)
+        comment          = optional(string)
+        files            = optional(map(string), {})
+      })), {})
+      tables = optional(map(object({
+        cluster_key        = string
+        table_type         = optional(string, "EXTERNAL")
+        data_source_format = optional(string, "DELTA")
+        storage_location   = string
+        comment            = optional(string)
+        table_columns = list(object({
+          name     = string
+          type     = string
+          comment  = optional(string)
+          nullable = optional(bool, true)
+        }))
+      })), {})
+    })), {})
+  }))
+  default  = {}
+  nullable = false
 
-variable "databricks_catalog_name" {
-  type        = string
-  description = "Databricks Unity Catalog Name"
-}
+  validation {
+    condition = alltrue([
+      for catalog in values(var.databricks_catalog_config) :
+      catalog.sample_data.enabled ? !contains([for name in keys(catalog.schemas) : lower(name)], "terraform_samples") : true
+    ])
+    error_message = "The terraform_samples schema is reserved when sample_data.enabled is true for its catalog."
+  }
 
-variable "databricks_catalog_external_location_url" {
-  type        = string
-  description = "Databricks Unity Catalog Cloud External Location URL"
+  validation {
+    condition = alltrue(flatten([
+      for catalog in values(var.databricks_catalog_config) : [
+        for schema in values(catalog.schemas) : [
+          for volume in values(schema.volumes) : (
+            volume.volume_type == "MANAGED" ? volume.storage_location == null : (
+              volume.volume_type == "EXTERNAL" ? (
+                volume.storage_location == null ? false : trimspace(volume.storage_location) != ""
+              ) : false
+            )
+          )
+        ]
+      ]
+    ]))
+    error_message = "Volumes must be MANAGED with no storage_location, or EXTERNAL with a non-empty storage_location."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for catalog in values(var.databricks_catalog_config) : [
+        for schema in values(catalog.schemas) : [
+          for table in values(schema.tables) : contains(keys(var.databricks_clusters), table.cluster_key)
+        ]
+      ]
+    ]))
+    error_message = "Every table cluster_key must reference a key in databricks_clusters."
+  }
 }
 
 ## ---------------------------------------------------------------------------------------------------------------------
@@ -23,28 +82,126 @@ variable "databricks_catalog_external_location_url" {
 ## These variables have defaults and may be overridden
 ## ---------------------------------------------------------------------------------------------------------------------
 
-variable "DATABRICKS_CLUSTERS" {
-  type        = number
-  description = "Number representing the amount of Databricks Clusters to spin up"
-  default     = 0
+variable "databricks_clusters" {
+  description = "Clusters keyed by cluster name, each with an independent policy."
+  type = map(object({
+    policy = object({
+      group                   = string
+      group_permission        = optional(string, "CAN_USE")
+      max_clusters_per_user   = optional(number, 3)
+      dbus_per_hour           = optional(number, 5)
+      autotermination_minutes = optional(number, 10)
+      data_security_mode      = optional(string, "USER_ISOLATION")
+    })
+
+    num_workers_min     = optional(number, 1)
+    num_workers_max     = optional(number, 1)
+    spark_env_variable  = optional(map(string), {})
+    spark_conf_variable = optional(map(string), {})
+
+    library_paths = optional(map(object({
+      artifact      = string
+      artifact_type = string
+      match_type    = string
+    })), {})
+    jar_libraries = optional(map(string), {})
+    whl_libraries = optional(map(string), {})
+
+    azure_attributes = optional(object({
+      attributes = object({
+        availability       = string
+        first_on_demand    = number
+        spot_bid_max_price = number
+      })
+    }))
+
+    aws_attributes = optional(object({
+      attributes = object({
+        availability           = string
+        zone_id                = string
+        first_on_demand        = number
+        spot_bid_price_percent = number
+        instance_profile_arn   = string
+      })
+    }))
+  }))
+  default  = {}
+  nullable = false
 }
 
-variable "databricks_workspace_group" {
-  type        = string
-  description = "Databricks Workspace Group Name for Cluster Policy"
-  default     = "example-engineer-group"
+variable "databricks_sql_warehouses" {
+  description = "SQL warehouses keyed by warehouse name."
+
+  type = map(object({
+    cluster_size                  = optional(string, "Small")
+    min_num_clusters              = optional(number, 1)
+    max_num_clusters              = optional(number, 1)
+    auto_stop_mins                = optional(number, 15)
+    enable_photon                 = optional(bool, true)
+    enable_serverless_compute     = optional(bool, false)
+    warehouse_type                = optional(string, "PRO")
+    tags                          = optional(map(string), {})
+    group_permissions             = optional(map(string), {})
+    user_permissions              = optional(map(string), {})
+    service_principal_permissions = optional(map(string), {})
+  }))
+
+  default  = {}
+  nullable = false
 }
 
-variable "databricks_schema_name" {
-  type        = string
-  description = "Databricks Example Schema Name"
-  default     = "example_metastore"
-}
+variable "databricks_workspace_groups" {
+  description = "Groups, memberships, workspace entitlements, and account-group workspace assignments."
 
-variable "databricks_volume_name" {
-  type        = string
-  description = "Databricks Example Volume Name"
-  default     = "example_volume"
+  type = map(object({
+    account_group = optional(bool, false)
+    members       = optional(map(string), {})
+
+    allow_cluster_create        = optional(bool)
+    allow_instance_pool_create  = optional(bool)
+    allow_databricks_sql_access = optional(bool)
+
+    workspace_entitlements = optional(object({
+      workspace_access           = optional(bool, false)
+      databricks_sql_access      = optional(bool, false)
+      allow_cluster_create       = optional(bool, false)
+      allow_instance_pool_create = optional(bool, false)
+    }))
+
+    workspace_assignments = optional(map(object({
+      workspace_id = number
+      permission   = optional(string, "USER")
+    })), {})
+  }))
+
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([
+      for group in values(var.databricks_workspace_groups) :
+      group.account_group || length(group.workspace_assignments) == 0
+    ])
+    error_message = "workspace_assignments can only be configured for account groups."
+  }
+
+  validation {
+    condition = alltrue([
+      for group in values(var.databricks_workspace_groups) :
+      group.account_group || group.workspace_entitlements == null
+    ])
+    error_message = "workspace_entitlements can only be configured for account groups; workspace-local groups must use the inline entitlement flags."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for group in values(var.databricks_workspace_groups) : [
+        for assignment in values(group.workspace_assignments) :
+        contains(["USER", "ADMIN"], assignment.permission)
+      ]
+    ]))
+    error_message = "Workspace assignment permission must be USER or ADMIN."
+  }
 }
 
 variable "databricks_secret_scope" {
@@ -57,85 +214,42 @@ variable "databricks_secrets" {
   description = "Map of Databricks Secrets"
   default     = []
   sensitive   = true
-  type        = list(object({
-    secret_name = string
+  type = list(object({
+    secret_name  = string
     secret_value = string
   }))
 }
 
-variable "databricks_cluster_policy_name" {
-  type        = string
-  description = "Databricks Cluster Policy Name"
-  default     = "example-cluster-policy"
-}
-
-variable "databricks_cluster_policy_autotermination_minutes" {
-  type        = number
-  description = "Databricks Cluster Policy Instance Auto-Termination in Minutes (Minimum: 10 minutes)"
-  default     = 10
-}
-
-variable "databricks_cluster_data_security_mode" {
-  type        = string
-  description = "Databricks Unity Catalog Feature to secure access/isolation. (Default: USER_ISOLATION)"
-  default     = "USER_ISOLATION"
-}
-
-variable "databricks_instance_pool_node_name" {
-  type        = string
-  description = "Databricks Worker Nodes Instance Pool's Name"
-  default     = "example-node-instace-pool"
-}
-
-variable "databricks_instance_pool_node_max_capacity" {
-  type        = number
-  description = "Databricks Worker Nodes Instance Pool's Maximum Number of Allocated Nodes"
-  default     = 2
-}
-
-variable "databricks_instance_pool_driver_name" {
-  type        = string
-  description = "Databricks Driver Nodes Instance Pool's Name"
-  default     = "example-driver-instace-pool"
-}
-
-variable "databricks_instance_pool_driver_max_capacity" {
-  type        = number
-  description = "Databricks Driver Instance Pool's Maximum Number of Allocated Nodes"
-  default     = 2
-}
-
-variable "databricks_cluster_spark_env_variable" {
-  type        = map(string)
-  description = "Databricks CLuster Spark Environment Variables"
-  default     = {}
-}
-
-variable "databricks_cluster_spark_conf_variable" {
-  type        = map(string)
-  description = "Databricks Cluster Spark Conf Parameters"
-  default     = {}
-}
-
-variable "databricks_cluster_library_files" {
-  description = "Databricks Unity Catalog Cluster Library Files to be added to Volume for Install"
-  default     = []
-  type        = list(object({
-    file_name      = string
-    content_base64 = string
+variable "databricks_instance_pools" {
+  description = "Driver and worker-node instance pool configurations."
+  type = map(object({
+    name         = string
+    max_capacity = number
   }))
-}
+  nullable = false
 
-variable "databricks_cluster_azure_attributes" {
-  description = "Azure Compute Configurations for Databricks Clusters"
-  default     = null
-  type        = object({
-    attributes = object({
-      availability       = string
-      first_on_demand    = number
-      spot_bid_max_price = number 
-    })
-  })
+  default = {
+    driver = {
+      name         = "example-driver-instace-pool"
+      max_capacity = 2
+    }
+    node = {
+      name         = "example-node-instace-pool"
+      max_capacity = 2
+    }
+  }
+
+  validation {
+    condition = (
+      length(var.databricks_instance_pools) == 2 &&
+      contains(keys(var.databricks_instance_pools), "driver") &&
+      contains(keys(var.databricks_instance_pools), "node") &&
+      alltrue([
+        for pool in values(var.databricks_instance_pools) : pool != null
+      ])
+    )
+    error_message = "Provide exactly two non-null instance pool configurations: driver and node."
+  }
 }
 
 variable "tags" {
