@@ -27,7 +27,7 @@ output "databricks_sql_warehouse_ids" {
 }
 
 output "databricks_unity_catalog_volume_file_paths" {
-  description = "Unity Catalog volume file paths keyed by JSON-encoded [catalog, schema] tuples."
+  description = "Unity Catalog volume file paths keyed by JSON-encoded [logical catalog key, logical schema key] tuples."
   value       = module.databricks_catalog_config.databricks_volume_file_paths
 }
 
@@ -38,6 +38,6 @@ output "databricks_sample_data_file_paths" {
 }
 
 output "databricks_unity_catalog_table_paths" {
-  description = "Unity Catalog table paths keyed by JSON-encoded [catalog, schema] tuples."
+  description = "Unity Catalog table paths keyed by JSON-encoded [logical catalog key, logical schema key] tuples."
   value       = module.databricks_catalog_tables.databricks_schema_table_paths
 }

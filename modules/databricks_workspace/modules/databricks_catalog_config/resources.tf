@@ -27,11 +27,12 @@ locals {
   storage_schemas = {
     for schema in flatten([
       for catalog_key, catalog in local.storage_catalogs : [
-        for schema_name, schema in catalog.schemas : {
-          key          = jsonencode([catalog_key, schema_name])
+        for schema_key, schema in catalog.schemas : {
+          key          = jsonencode([catalog_key, schema_key])
           catalog_key  = catalog_key
           catalog_name = catalog.name
-          schema_name  = schema_name
+          schema_key   = schema_key
+          schema_name  = schema.name != null ? schema.name : schema_key
           force_delete = schema.force_delete
           comment      = schema.comment
           properties   = schema.properties
@@ -43,11 +44,11 @@ locals {
 
   storage_volumes = {
     for volume in flatten([
-      for schema_key, schema in local.storage_schemas : [
+      for schema_resource_key, schema in local.storage_schemas : [
         for volume_name, volume in schema.volumes : {
           key = jsonencode([
             schema.catalog_key,
-            schema.schema_name,
+            schema.schema_key,
             volume_name,
           ])
           catalog_key      = schema.catalog_key
@@ -65,21 +66,21 @@ locals {
 
   # Keep a list to preserve volume-name/file-name ordering within each schema.
   storage_file_entries = flatten([
-    for schema_key, schema in local.storage_schemas : [
+    for schema_resource_key, schema in local.storage_schemas : [
       for volume_name, volume in schema.volumes : [
         for file_name, content_base64 in volume.files : {
           key = jsonencode([
             schema.catalog_key,
-            schema.schema_name,
+            schema.schema_key,
             volume_name,
             file_name,
           ])
-          schema_key     = schema_key
-          catalog_name   = schema.catalog_name
-          schema_name    = schema.schema_name
-          volume_name    = volume_name
-          file_name      = file_name
-          content_base64 = content_base64
+          schema_resource_key = schema_resource_key
+          catalog_name        = schema.catalog_name
+          schema_name         = schema.schema_name
+          volume_name         = volume_name
+          file_name           = file_name
+          content_base64      = content_base64
         }
       ]
     ]
@@ -93,11 +94,12 @@ locals {
   table_schemas = {
     for schema in flatten([
       for catalog_key, catalog in local.table_catalogs : [
-        for schema_name, schema in catalog.schemas : {
-          key          = jsonencode([catalog_key, schema_name])
+        for schema_key, schema in catalog.schemas : {
+          key          = jsonencode([catalog_key, schema_key])
           catalog_key  = catalog_key
           catalog_name = catalog.name
-          schema_name  = schema_name
+          schema_key   = schema_key
+          schema_name  = schema.name != null ? schema.name : schema_key
           tables       = schema.tables
         }
         if length(schema.tables) > 0
@@ -107,23 +109,23 @@ locals {
 
   # No cluster-ID lookup occurs here or anywhere in storage expansion.
   table_entries = flatten([
-    for schema_key, schema in local.table_schemas : [
+    for schema_resource_key, schema in local.table_schemas : [
       for table_name, table in schema.tables : {
         key = jsonencode([
           schema.catalog_key,
-          schema.schema_name,
+          schema.schema_key,
           table_name,
         ])
-        schema_key         = schema_key
-        catalog_name       = schema.catalog_name
-        schema_name        = schema.schema_name
-        table_name         = table_name
-        cluster_key        = table.cluster_key
-        table_type         = table.table_type
-        data_source_format = table.data_source_format
-        storage_location   = table.storage_location
-        comment            = table.comment
-        table_columns      = table.table_columns
+        schema_resource_key = schema_resource_key
+        catalog_name        = schema.catalog_name
+        schema_name         = schema.schema_name
+        table_name          = table_name
+        cluster_key         = table.cluster_key
+        table_type          = table.table_type
+        data_source_format  = table.data_source_format
+        storage_location    = table.storage_location
+        comment             = table.comment
+        table_columns       = table.table_columns
       }
     ]
   ])

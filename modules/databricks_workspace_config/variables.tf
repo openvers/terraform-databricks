@@ -4,7 +4,7 @@
 ## ---------------------------------------------------------------------------------------------------------------------
 
 variable "databricks_catalog_config" {
-  description = "Unity Catalog configuration keyed by catalog, schema, volume, file, and table names. File values are base64-encoded content. Catalog and schema force_delete flags independently allow nonempty deletion; false is not deletion protection, and forced parent deletion can remove descendants."
+  description = "Unity Catalog configuration keyed by logical catalog/schema identities and volume/file/table names. Schema name optionally overrides its logical key and may be computed; map keys must be plan-known. File values are base64-encoded content. Catalog and schema force_delete flags independently allow nonempty deletion; false is not deletion protection, and forced parent deletion can remove descendants."
   type = map(object({
     name         = string
     create       = optional(bool, true)
@@ -15,6 +15,7 @@ variable "databricks_catalog_config" {
       enabled = optional(bool, false)
     }), {})
     schemas = optional(map(object({
+      name         = optional(string)
       force_delete = optional(bool, false)
       comment      = optional(string)
       properties   = optional(map(string), {})
@@ -46,9 +47,22 @@ variable "databricks_catalog_config" {
   validation {
     condition = alltrue([
       for catalog in values(var.databricks_catalog_config) :
-      catalog.sample_data.enabled ? !contains([for name in keys(catalog.schemas) : lower(name)], "terraform_samples") : true
+      catalog.sample_data.enabled ? !contains([
+        for schema_key, schema in catalog.schemas :
+        lower(schema.name != null ? schema.name : schema_key)
+      ], "terraform_samples") : true
     ])
     error_message = "The terraform_samples schema is reserved when sample_data.enabled is true for its catalog."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for catalog in values(var.databricks_catalog_config) : [
+        for schema in values(catalog.schemas) :
+        schema.name == null ? true : trimspace(schema.name) != "" && schema.name == trimspace(schema.name)
+      ]
+    ]))
+    error_message = "Schema name overrides must be nonblank and unpadded when provided."
   }
 
   validation {
