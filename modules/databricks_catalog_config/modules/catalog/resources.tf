@@ -95,7 +95,7 @@ module "databricks_sample_data" {
 
   depends_on = [module.databricks_catalogs]
 
-  catalog_name = each.key
+  catalog_name = each.value.name
 
   providers = {
     databricks.workspace = databricks.workspace
