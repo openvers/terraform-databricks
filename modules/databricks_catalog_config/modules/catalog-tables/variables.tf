@@ -1,6 +1,7 @@
 variable "databricks_catalog_config" {
   description = "Table configuration keyed by catalog, schema, and table names."
   type = map(object({
+    name    = string 
     schemas = optional(map(object({
       tables = optional(map(object({
         cluster_key        = string

@@ -22,7 +22,10 @@ terraform {
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_catalog" "this" {
   provider = databricks.workspace
-  for_each = tomap({ for t in coalesce(var.databricks_catalogs, []) : "${t.name}" => t })
+  for_each = {
+    for catalog in coalesce(var.databricks_catalogs, []) :
+    catalog.key => catalog
+  }
 
   name       = each.value.name
   comment    = each.value.comment

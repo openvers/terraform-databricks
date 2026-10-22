@@ -13,16 +13,17 @@ locals {
   # Tuple keys keep repeated schema names in different catalogs independent.
   databricks_catalog_schemas = {
     for schema in flatten([
-      for catalog_name, catalog in var.databricks_catalog_config : [
+      for catalog_key, catalog in var.databricks_catalog_config : [
         for schema_name, schema in catalog.schemas : {
-          catalog_name = catalog_name
+          catalog_key  = catalog_key
+          catalog_name = catalog.name
           schema_name  = schema_name
           comment      = schema.comment
           properties   = schema.properties
           volumes      = schema.volumes
         }
       ]
-    ]) : jsonencode([schema.catalog_name, schema.schema_name]) => schema
+    ]) : jsonencode([schema.catalog_key, schema.schema_name]) => schema
   }
 }
 
@@ -31,10 +32,11 @@ module "databricks_catalogs" {
   for_each = var.databricks_catalog_config
 
   databricks_catalogs = each.value.create ? [{
-    name       = each.key
-    comment    = each.value.comment
-    properties = each.value.properties
-  }] : []
+  key        = each.key
+  name       = each.value.name
+  comment    = each.value.comment
+  properties = each.value.properties
+}] : []
 
   providers = {
     databricks.workspace = databricks.workspace

@@ -129,7 +129,7 @@ module "databricks_workspace_group" {
     if !group.account_group
   }
 
-  group_name = each.key
+  group_name = each.value.name
   members    = each.value.members
 
   allow_cluster_create = coalesce(
@@ -321,8 +321,9 @@ module "databricks_sql_warehouse" {
   # Wait for root-managed groups, workspace assignments, and entitlements before assigning permissions.
   depends_on = [module.databricks_workspace_group, module.databricks_account_group]
 
-  warehouse_name = each.key
+  warehouse_name = each.value.name
   config         = each.value
+  group_names    = local.databricks_group_names
 
   providers = {
     databricks.workspace = databricks.workspace

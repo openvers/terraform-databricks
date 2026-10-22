@@ -70,3 +70,9 @@ variable "config" {
     error_message = "Permission map keys must be nonblank principal identifiers without leading or trailing whitespace."
   }
 }
+
+variable "group_names" {
+  description = "Workspace group display names keyed by logical group keys."
+  type        = map(string)
+  nullable    = false
+}

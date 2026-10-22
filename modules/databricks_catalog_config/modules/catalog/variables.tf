@@ -1,6 +1,7 @@
 variable "databricks_catalog_config" {
   description = "Unity Catalog storage configuration keyed by catalog, schema, volume, and file names. File values are base64-encoded content."
   type = map(object({
+    name       = string 
     create     = optional(bool, true)
     comment    = optional(string)
     properties = optional(map(string), {})

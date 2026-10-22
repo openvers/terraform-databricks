@@ -6,6 +6,7 @@
 variable "databricks_catalog_config" {
   description = "Unity Catalog configuration keyed by catalog, schema, volume, file, and table names. File values are base64-encoded content."
   type = map(object({
+    name       = string
     create     = optional(bool, true)
     comment    = optional(string)
     properties = optional(map(string), {})
@@ -219,6 +220,7 @@ variable "databricks_sql_warehouses" {
   description = "SQL warehouses keyed by warehouse name."
 
   type = map(object({
+    name                          = string
     cluster_size                  = optional(string, "Small")
     min_num_clusters              = optional(number, 1)
     max_num_clusters              = optional(number, 1)
@@ -240,6 +242,7 @@ variable "databricks_workspace_groups" {
   description = "Groups, memberships, workspace entitlements, and account-group workspace assignments."
 
   type = map(object({
+    name          = string
     account_group = optional(bool, false)
     members       = optional(map(string), {})
 

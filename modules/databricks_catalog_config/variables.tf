@@ -9,9 +9,11 @@
 ## ---------------------------------------------------------------------------------------------------------------------
 
 variable "databricks_catalogs" {
-  description = "Databricks Catalog Attributes"
+  description = "Catalogs with stable logical keys and separate physical names."
   default     = null
+
   type = list(object({
+    key        = string
     name       = string
     comment    = string
     properties = map(string)

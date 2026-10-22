@@ -47,8 +47,8 @@ resource "databricks_permissions" "this" {
     for_each = var.config.group_permissions
 
     content {
-      group_name       = access_control.key
-      permission_level = access_control.value
+        group_name       = var.group_names[access_control.key]
+        permission_level = access_control.value
     }
   }
 
