@@ -4,18 +4,20 @@
 ## ---------------------------------------------------------------------------------------------------------------------
 
 variable "databricks_catalog_config" {
-  description = "Unity Catalog configuration keyed by catalog, schema, volume, file, and table names. File values are base64-encoded content."
+  description = "Unity Catalog configuration keyed by catalog, schema, volume, file, and table names. File values are base64-encoded content. Catalog and schema force_delete flags independently allow nonempty deletion; false is not deletion protection, and forced parent deletion can remove descendants."
   type = map(object({
-    name       = string
-    create     = optional(bool, true)
-    comment    = optional(string)
-    properties = optional(map(string), {})
+    name         = string
+    create       = optional(bool, true)
+    force_delete = optional(bool, false)
+    comment      = optional(string)
+    properties   = optional(map(string), {})
     sample_data = optional(object({
       enabled = optional(bool, false)
     }), {})
     schemas = optional(map(object({
-      comment    = optional(string)
-      properties = optional(map(string), {})
+      force_delete = optional(bool, false)
+      comment      = optional(string)
+      properties   = optional(map(string), {})
       volumes = optional(map(object({
         volume_type      = optional(string, "MANAGED")
         storage_location = optional(string)

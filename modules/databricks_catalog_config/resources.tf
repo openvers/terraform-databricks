@@ -1,13 +1,139 @@
 terraform {
+  required_version = ">= 1.9"
+
   required_providers {
     databricks = {
-      source = "databricks/databricks"
-      configuration_aliases = [
-        databricks.workspace,
-      ]
+      source                = "databricks/databricks"
+      configuration_aliases = [databricks.workspace]
     }
   }
 }
+
+
+locals {
+  # Partition ownership before flattening or resolving cluster IDs.
+  storage_catalogs = {
+    for catalog_key, catalog in var.databricks_catalog_config :
+    catalog_key => catalog
+    if var.phase == "storage"
+  }
+
+  table_catalogs = {
+    for catalog_key, catalog in var.databricks_catalog_config :
+    catalog_key => catalog
+    if var.phase == "tables"
+  }
+
+  storage_schemas = {
+    for schema in flatten([
+      for catalog_key, catalog in local.storage_catalogs : [
+        for schema_name, schema in catalog.schemas : {
+          key          = jsonencode([catalog_key, schema_name])
+          catalog_key  = catalog_key
+          catalog_name = catalog.name
+          schema_name  = schema_name
+          force_delete = schema.force_delete
+          comment      = schema.comment
+          properties   = schema.properties
+          volumes      = schema.volumes
+        }
+      ]
+    ]) : schema.key => schema
+  }
+
+  storage_volumes = {
+    for volume in flatten([
+      for schema_key, schema in local.storage_schemas : [
+        for volume_name, volume in schema.volumes : {
+          key = jsonencode([
+            schema.catalog_key,
+            schema.schema_name,
+            volume_name,
+          ])
+          catalog_key      = schema.catalog_key
+          catalog_name     = schema.catalog_name
+          schema_name      = schema.schema_name
+          volume_name      = volume_name
+          volume_type      = volume.volume_type
+          storage_location = volume.storage_location
+          storage_path     = volume.storage_path
+          comment          = volume.comment
+        }
+      ]
+    ]) : volume.key => volume
+  }
+
+  # Keep a list to preserve volume-name/file-name ordering within each schema.
+  storage_file_entries = flatten([
+    for schema_key, schema in local.storage_schemas : [
+      for volume_name, volume in schema.volumes : [
+        for file_name, content_base64 in volume.files : {
+          key = jsonencode([
+            schema.catalog_key,
+            schema.schema_name,
+            volume_name,
+            file_name,
+          ])
+          schema_key     = schema_key
+          catalog_name   = schema.catalog_name
+          schema_name    = schema.schema_name
+          volume_name    = volume_name
+          file_name      = file_name
+          content_base64 = content_base64
+        }
+      ]
+    ]
+  ])
+
+  storage_files = {
+    for file in local.storage_file_entries :
+    file.key => file
+  }
+
+  table_schemas = {
+    for schema in flatten([
+      for catalog_key, catalog in local.table_catalogs : [
+        for schema_name, schema in catalog.schemas : {
+          key          = jsonencode([catalog_key, schema_name])
+          catalog_key  = catalog_key
+          catalog_name = catalog.name
+          schema_name  = schema_name
+          tables       = schema.tables
+        }
+        if length(schema.tables) > 0
+      ]
+    ]) : schema.key => schema
+  }
+
+  # No cluster-ID lookup occurs here or anywhere in storage expansion.
+  table_entries = flatten([
+    for schema_key, schema in local.table_schemas : [
+      for table_name, table in schema.tables : {
+        key = jsonencode([
+          schema.catalog_key,
+          schema.schema_name,
+          table_name,
+        ])
+        schema_key         = schema_key
+        catalog_name       = schema.catalog_name
+        schema_name        = schema.schema_name
+        table_name         = table_name
+        cluster_key        = table.cluster_key
+        table_type         = table.table_type
+        data_source_format = table.data_source_format
+        storage_location   = table.storage_location
+        comment            = table.comment
+        table_columns      = table.table_columns
+      }
+    ]
+  ])
+
+  tables = {
+    for table in local.table_entries :
+    table.key => table
+  }
+}
+
 
 ## ---------------------------------------------------------------------------------------------------------------------
 ## DATABRICKS CATALOG RESOURCE
@@ -23,13 +149,15 @@ terraform {
 resource "databricks_catalog" "this" {
   provider = databricks.workspace
   for_each = {
-    for catalog in coalesce(var.databricks_catalogs, []) :
-    catalog.key => catalog
+    for catalog_key, catalog in local.storage_catalogs :
+    catalog_key => catalog
+    if catalog.create
   }
 
-  name       = each.value.name
-  comment    = each.value.comment
-  properties = each.value.properties
+  name          = each.value.name
+  comment       = each.value.comment
+  properties    = each.value.properties
+  force_destroy = each.value.force_delete
 }
 
 
@@ -45,14 +173,16 @@ resource "databricks_catalog" "this" {
 ## - `properties`: Mapping of Unity Catalog Schema properties.
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_schema" "this" {
-  provider   = databricks.workspace
-  depends_on = [databricks_catalog.this]
-  for_each   = tomap({ for t in coalesce(var.databricks_schemas, []) : "${t.schema_name}" => t })
+  provider = databricks.workspace
+  for_each = local.storage_schemas
 
-  catalog_name = each.value.catalog_name
-  name         = each.value.schema_name
-  comment      = each.value.comment
-  properties   = each.value.properties
+  depends_on = [databricks_catalog.this]
+
+  catalog_name  = each.value.catalog_name
+  name          = each.value.schema_name
+  comment       = each.value.comment
+  properties    = each.value.properties
+  force_destroy = each.value.force_delete
 }
 
 
@@ -69,20 +199,22 @@ resource "databricks_schema" "this" {
 ## - `comment`: Commentary to add to Unity Catalog Schema.
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_volume" "this" {
-  provider   = databricks.workspace
-  depends_on = [databricks_schema.this]
-  for_each   = tomap({ for t in coalesce(var.databricks_volumes, []) : "${t.volume_name}" => t })
+  provider = databricks.workspace
+  for_each = local.storage_volumes
 
-  catalog_name     = each.value.catalog_name
-  schema_name      = each.value.schema_name
-  name             = each.value.volume_name
-  volume_type      = each.value.volume_type
+  depends_on = [databricks_schema.this]
+
+  catalog_name = each.value.catalog_name
+  schema_name  = each.value.schema_name
+  name         = each.value.volume_name
+  volume_type  = each.value.volume_type
+  comment      = each.value.comment
+
   storage_location = each.value.volume_type == "MANAGED" ? null : (
     each.value.storage_path != null
     ? each.value.storage_path
     : "${each.value.storage_location}/volumes/${each.value.volume_name}"
   )
-  comment          = each.value.comment
 }
 
 
@@ -96,12 +228,14 @@ resource "databricks_volume" "this" {
 ## - `content_base64`: Base64 encoded content for file upload.
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_file" "this" {
-  provider   = databricks.workspace
-  depends_on = [databricks_volume.this]
-  count      = var.databricks_files != null ? length(var.databricks_files) : 0
+  provider = databricks.workspace
+  for_each = local.storage_files
 
-  path           = "/Volumes/${var.databricks_files[count.index].catalog_name}/${var.databricks_files[count.index].schema_name}/${var.databricks_files[count.index].volume_name}/${var.databricks_files[count.index].file_name}"
-  content_base64 = var.databricks_files[count.index].content_base64
+  depends_on = [databricks_volume.this]
+
+  path = "/Volumes/${each.value.catalog_name}/${each.value.schema_name}/${each.value.volume_name}/${each.value.file_name}"
+
+  content_base64 = each.value.content_base64
 }
 
 
@@ -120,13 +254,13 @@ resource "databricks_file" "this" {
 ## - `storage_location`: Table file URL storage location.
 ## - `comment`: Description of table contents.
 ## ---------------------------------------------------------------------------------------------------------------------
-
 resource "databricks_sql_table" "this" {
-  provider   = databricks.workspace
-  depends_on = [databricks_schema.this]
-  for_each   = tomap({ for t in coalesce(var.databricks_tables, []) : "${t.table_name}" => t })
+  provider = databricks.workspace
+  for_each = local.tables
 
-  cluster_id         = each.value.cluster_id
+  # Catalog/schema readiness is supplied by the caller.
+  # This phase intentionally creates no catalog or schema resources.
+  cluster_id         = var.cluster_ids[each.value.cluster_key]
   catalog_name       = each.value.catalog_name
   schema_name        = each.value.schema_name
   name               = each.value.table_name
@@ -136,7 +270,10 @@ resource "databricks_sql_table" "this" {
   comment            = each.value.comment
 
   dynamic "column" {
-    for_each = tomap({ for c in coalesce(each.value.table_columns, []) : "${c.name}" => c })
+    for_each = {
+      for column in each.value.table_columns :
+      column.name => column
+    }
 
     content {
       name     = column.value.name

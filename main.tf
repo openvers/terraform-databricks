@@ -215,8 +215,9 @@ module "databricks_cluster_policy" {
 
 
 module "databricks_catalog_config" {
-  source = "./modules/databricks_catalog_config/modules/catalog"
+  source = "./modules/databricks_catalog_config"
 
+  phase                     = "storage"
   databricks_catalog_config = var.databricks_catalog_config
 
   providers = {
@@ -227,7 +228,10 @@ module "databricks_catalog_config" {
 module "databricks_artifact_allowlists" {
   source = "./modules/databricks_artifact_allowlists"
 
-  depends_on = [module.databricks_catalog_config]
+  depends_on = [
+  module.databricks_catalog_config,
+  module.databricks_sample_data,
+]
 
   artifact_allowlist_requests = concat(
     flatten([
@@ -251,12 +255,29 @@ module "databricks_artifact_allowlists" {
 }
 
 module "databricks_catalog_tables" {
-  source = "./modules/databricks_catalog_config/modules/catalog-tables"
+  source = "./modules/databricks_catalog_config"
 
   databricks_catalog_config = var.databricks_catalog_config
+  phase = "tables"
   cluster_ids = {
     for key, cluster in module.databricks_cluster : key => cluster.databricks_cluster_id
   }
+
+  depends_on = [
+  module.databricks_catalog_config,
+  module.databricks_sample_data,
+  module.databricks_cluster,
+]
+
+  providers = {
+    databricks.workspace = databricks.workspace
+  }
+}
+
+module "databricks_sample_data" {
+  source = "./modules/databricks_sample_data"
+
+  databricks_catalog_config = var.databricks_catalog_config
 
   depends_on = [module.databricks_catalog_config]
 

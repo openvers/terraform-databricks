@@ -32,8 +32,9 @@ output "databricks_unity_catalog_volume_file_paths" {
 }
 
 output "databricks_sample_data_file_paths" {
-  description = "Optional sample file paths keyed by catalog name, then dataset identity."
-  value       = module.databricks_catalog_config.sample_data_file_paths
+  description = "Sample file paths keyed by logical catalog and dataset."
+
+  value = module.databricks_sample_data.file_paths
 }
 
 output "databricks_unity_catalog_table_paths" {
