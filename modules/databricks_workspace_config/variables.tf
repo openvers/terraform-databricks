@@ -162,9 +162,9 @@ variable "databricks_clusters" {
   validation {
     condition = try(alltrue([
       for cluster in values(var.databricks_clusters) :
-      contains(concat(keys(var.databricks_workspace_groups), keys(var.databricks_existing_groups)), cluster.policy.group)
+      contains(keys(var.databricks_existing_groups), cluster.policy.group)
     ]), false)
-    error_message = "Every cluster policy.group must reference a key in databricks_workspace_groups or databricks_existing_groups."
+    error_message = "Every cluster policy.group must reference a key in databricks_existing_groups."
   }
 }
 
@@ -240,61 +240,6 @@ variable "databricks_sql_warehouses" {
   nullable = false
 }
 
-variable "databricks_workspace_groups" {
-  description = "Groups, memberships, workspace entitlements, and account-group workspace assignments."
-
-  type = map(object({
-    name          = string
-    account_group = optional(bool, false)
-    members       = optional(map(string), {})
-
-    allow_cluster_create        = optional(bool)
-    allow_instance_pool_create  = optional(bool)
-    allow_databricks_sql_access = optional(bool)
-
-    workspace_entitlements = optional(object({
-      workspace_access           = optional(bool, false)
-      databricks_sql_access      = optional(bool, false)
-      allow_cluster_create       = optional(bool, false)
-      allow_instance_pool_create = optional(bool, false)
-    }))
-
-    workspace_assignments = optional(map(object({
-      workspace_id = number
-      permission   = optional(string, "USER")
-    })), {})
-  }))
-
-  default  = {}
-  nullable = false
-
-  validation {
-    condition = alltrue([
-      for group in values(var.databricks_workspace_groups) :
-      group.account_group || length(group.workspace_assignments) == 0
-    ])
-    error_message = "workspace_assignments can only be configured for account groups."
-  }
-
-  validation {
-    condition = alltrue([
-      for group in values(var.databricks_workspace_groups) :
-      group.account_group || group.workspace_entitlements == null
-    ])
-    error_message = "workspace_entitlements can only be configured for account groups; workspace-local groups must use the inline entitlement flags."
-  }
-
-  validation {
-    condition = alltrue(flatten([
-      for group in values(var.databricks_workspace_groups) : [
-        for assignment in values(group.workspace_assignments) :
-        contains(["USER", "ADMIN"], assignment.permission)
-      ]
-    ]))
-    error_message = "Workspace assignment permission must be USER or ADMIN."
-  }
-}
-
 variable "databricks_existing_groups" {
   description = "Reference-only map of logical group keys to existing Databricks display names. No identity, membership, assignment, entitlement, or lookup is managed. An external owner must ensure workspace availability and readiness before use."
   type        = map(string)
@@ -309,15 +254,6 @@ variable "databricks_existing_groups" {
     error_message = "Existing group keys must be nonblank, and display names must be non-null, nonblank, and unpadded."
   }
 
-  validation {
-    condition     = length(setintersection(toset(keys(var.databricks_existing_groups)), toset(keys(var.databricks_workspace_groups)))) == 0
-    error_message = "Existing group logical keys must not overlap keys in databricks_workspace_groups."
-  }
-
-  validation {
-    condition     = length(setintersection(toset(values(var.databricks_existing_groups)), toset(keys(var.databricks_workspace_groups)))) == 0
-    error_message = "Existing group display names must not overlap keys in databricks_workspace_groups."
-  }
 }
 
 variable "manage_secret_scope" {

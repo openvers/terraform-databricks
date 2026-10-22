@@ -1,8 +1,8 @@
 terraform {
   required_providers {
     databricks = {
-      source = "databricks/databricks"
-      configuration_aliases = [ databricks.workspace ]
+      source                = "databricks/databricks"
+      configuration_aliases = [databricks.workspace]
     }
   }
 }
@@ -28,7 +28,7 @@ data "databricks_spark_version" "latest" {
 ## - `category`: The category of nodes to filter. Example: "Standard_DS_v2"
 ## ---------------------------------------------------------------------------------------------------------------------
 data "databricks_node_type" "this" {
-  provider      = databricks.workspace
+  provider = databricks.workspace
 
   min_memory_gb = var.node_min_memory_gb
   min_cores     = var.node_min_cores
@@ -58,23 +58,23 @@ data "databricks_node_type" "this" {
 ##   - `gcp_availability`: Availability type for GCP instances.
 ## ---------------------------------------------------------------------------------------------------------------------
 resource "databricks_instance_pool" "this" {
-  provider                              = databricks.workspace
-  
+  provider = databricks.workspace
+
   instance_pool_name                    = var.instance_pool_name
   min_idle_instances                    = var.instance_pool_min_idle_instances
   max_capacity                          = var.instance_pool_max_capacity
   node_type_id                          = data.databricks_node_type.this.id
   idle_instance_autotermination_minutes = var.instance_pool_autotermination
-  preloaded_spark_versions              = [
+  preloaded_spark_versions = [
     data.databricks_spark_version.latest.id
   ]
-  
+
   dynamic "aws_attributes" {
     for_each = var.aws_attributes
 
     content {
-      availability           = aws_attributes.availability
-      spot_bid_price_percent = aws_attributes.spot_bid_price_percent
+      availability           = aws_attributes.value.availability
+      spot_bid_price_percent = aws_attributes.value.spot_bid_price_percent
     }
   }
 
@@ -82,8 +82,8 @@ resource "databricks_instance_pool" "this" {
     for_each = var.azure_attributes
 
     content {
-      availability       = azure_attributes.availability
-      spot_bid_max_price = azure_attributes.spot_bid_max_price
+      availability       = azure_attributes.value.availability
+      spot_bid_max_price = azure_attributes.value.spot_bid_max_price
     }
   }
 
@@ -91,7 +91,7 @@ resource "databricks_instance_pool" "this" {
     for_each = var.gcp_attributes
 
     content {
-      gcp_availability = gcp_attributes.gcp_availability
+      gcp_availability = gcp_attributes.value.gcp_availability
     }
   }
 }

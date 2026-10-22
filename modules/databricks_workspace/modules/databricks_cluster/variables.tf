@@ -59,11 +59,12 @@ variable "num_workers_max" {
 
 variable "library_paths" {
   description = "Map of Databricks Unity Catalog Library Volume to be included in the ALLOWED LIST on Databricks Cluster"
-  default     = null
-  type        = map(object({
-      artifact      = string
-      artifact_type = string
-      match_type    = string
+  default     = {}
+  nullable    = false
+  type = map(object({
+    artifact      = string
+    artifact_type = string
+    match_type    = string
   }))
 }
 
@@ -82,11 +83,11 @@ variable "whl_libraries" {
 variable "azure_attributes" {
   description = "Azure Compute Configurations for Databricks Clusters"
   default     = null
-  type        = object({
+  type = object({
     attributes = object({
       availability       = string
       first_on_demand    = number
-      spot_bid_max_price = number 
+      spot_bid_max_price = number
     })
   })
 }
@@ -94,7 +95,7 @@ variable "azure_attributes" {
 variable "aws_attributes" {
   description = "AWS Compute Configurations for Databricks Clusters"
   default     = null
-  type        = object({
+  type = object({
     attributes = object({
       availability           = string
       zone_id                = string

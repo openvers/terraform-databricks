@@ -14,36 +14,16 @@ terraform {
 
 
 locals {
-  databricks_group_names = merge(
-    {
-      for name, group in module.databricks_workspace_group :
-      name => group.databricks_group_name
-    },
-    {
-      for name, group in module.databricks_account_group :
-      name => group.databricks_group_name
-    },
-    var.databricks_existing_groups
-  )
+  databricks_group_names = var.databricks_existing_groups
 
-  databricks_secrets_by_name = {
-    for secret in var.databricks_secrets : secret.secret_name => secret.secret_value
+  secret_values = {
+    for secret in var.databricks_secrets :
+    secret.secret_name => secret.secret_value
   }
 }
 
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS SECRET SCOPE MODULE
-## 
-## This module creates a Databricks secret scope in an Azure Databricks workspace. We're unable to create a
-## Databricks Secret Scope backed by Azure Key Vault due to the workspace provider requiring Azure specific
-## authentication methods (Cannot be created using PAT).
-## 
-## Parameters:
-## - `secret_scope`: Specifies the name of Databricks Secret Scope.
-## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_secret_scope" {
-  source = "./modules/databricks_secret_scope"
+  source = "../databricks_workspace/modules/databricks_secret_scope"
   count  = var.manage_secret_scope ? 1 : 0
 
   secret_scope = var.databricks_secret_scope
@@ -54,16 +34,14 @@ module "databricks_secret_scope" {
 }
 
 module "databricks_secret" {
-  source = "./modules/databricks_secret"
+  source = "../databricks_workspace/modules/databricks_secret"
 
-  # Only names are declassified; secret values remain sensitive.
-  for_each = var.manage_databricks_secrets ? nonsensitive(toset([
-    for secret in var.databricks_secrets : secret.secret_name
-  ])) : toset([])
+  # Only names are exposed as addresses; secret values remain sensitive.
+  for_each = var.manage_databricks_secrets ? nonsensitive(toset(keys(local.secret_values))) : toset([])
 
-  secret_name     = each.key
-  secret_data     = local.databricks_secrets_by_name[each.key]
   secret_scope_id = var.manage_secret_scope ? module.databricks_secret_scope[0].databricks_secret_scope_id : var.databricks_secret_scope
+  secret_name     = each.key
+  secret_data     = local.secret_values[each.key]
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -78,7 +56,7 @@ module "databricks_secret" {
 ## authenticate with the Databricks Workspace via CLI/Curl without needing to pass Service Principal Credentials.
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_workspace_access_token" {
-  source = "./modules/databricks_pat_token"
+  source = "../databricks_workspace/modules/databricks_pat_token"
   count  = var.create_databricks_access_token ? 1 : 0
 
   providers = {
@@ -97,7 +75,7 @@ module "databricks_workspace_access_token" {
 ## - `instance_pool_max_capacity`: Specifies the maximum capacity of the instance pool
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_instance_pool" {
-  source   = "./modules/databricks_instance_pool"
+  source   = "../databricks_workspace/modules/databricks_instance_pool"
   for_each = var.databricks_instance_pools
 
   instance_pool_name         = each.value.name
@@ -105,78 +83,6 @@ module "databricks_instance_pool" {
 
   providers = {
     databricks.workspace = databricks.workspace
-  }
-}
-
-
-## ---------------------------------------------------------------------------------------------------------------------
-## DATABRICKS WORKSPACE GROUP MODULE
-## 
-## This module sets up agroup in a Databricks at the workspace level. Workspace level groups are required
-## to nominate group level access control with Cluster Policies.
-## 
-## Parameters:
-## - `group_name`: Specifies the name of the engineer group.
-## - `allow_cluster_create`: Specify whether to allow the group to create clusters.
-## - `allow_databricks_sql_access`: Specify whether to allow SQL access to Databricks.
-## ---------------------------------------------------------------------------------------------------------------------
-module "databricks_workspace_group" {
-  source = "./modules/databricks_group"
-
-  for_each = {
-    for name, group in var.databricks_workspace_groups :
-    name => group
-    if !group.account_group
-  }
-
-  group_name = each.value.name
-  members    = each.value.members
-
-  allow_cluster_create = coalesce(
-    each.value.allow_cluster_create, true
-  )
-  allow_instance_pool_create = coalesce(
-    each.value.allow_instance_pool_create, false
-  )
-  allow_databricks_sql_access = coalesce(
-    each.value.allow_databricks_sql_access, true
-  )
-
-  providers = {
-    databricks.workspace        = databricks.workspace
-    databricks.workspace_target = databricks.workspace
-  }
-}
-
-
-module "databricks_account_group" {
-  source = "./modules/databricks_group"
-
-  for_each = {
-    for name, group in var.databricks_workspace_groups :
-    name => group
-    if group.account_group
-  }
-
-  account_group          = true
-  group_name             = each.value.name
-  members                = each.value.members
-  workspace_assignments  = each.value.workspace_assignments
-  workspace_entitlements = each.value.workspace_entitlements
-
-  allow_cluster_create = coalesce(
-    each.value.allow_cluster_create, false
-  )
-  allow_instance_pool_create = coalesce(
-    each.value.allow_instance_pool_create, false
-  )
-  allow_databricks_sql_access = coalesce(
-    each.value.allow_databricks_sql_access, false
-  )
-
-  providers = {
-    databricks.workspace        = databricks.accounts
-    databricks.workspace_target = databricks.workspace
   }
 }
 
@@ -192,12 +98,11 @@ module "databricks_account_group" {
 ## - `data_security_mode`: Databrick cluster security mode
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_cluster_policy" {
-  source   = "./modules/databricks_cluster_policy"
+  source   = "../databricks_workspace/modules/databricks_cluster_policy"
   for_each = var.databricks_clusters
 
   depends_on = [
     module.databricks_instance_pool,
-    module.databricks_account_group
   ]
 
   cluster_policy_name           = "${each.key}-policy"
@@ -215,7 +120,7 @@ module "databricks_cluster_policy" {
 
 
 module "databricks_catalog_config" {
-  source = "./modules/databricks_catalog_config"
+  source = "../databricks_workspace/modules/databricks_catalog_config"
 
   phase                     = "storage"
   databricks_catalog_config = var.databricks_catalog_config
@@ -226,12 +131,12 @@ module "databricks_catalog_config" {
 }
 
 module "databricks_artifact_allowlists" {
-  source = "./modules/databricks_artifact_allowlists"
+  source = "../databricks_workspace/modules/databricks_artifact_allowlists"
 
   depends_on = [
-  module.databricks_catalog_config,
-  module.databricks_sample_data,
-]
+    module.databricks_catalog_config,
+    module.databricks_sample_data,
+  ]
 
   artifact_allowlist_requests = concat(
     flatten([
@@ -255,19 +160,19 @@ module "databricks_artifact_allowlists" {
 }
 
 module "databricks_catalog_tables" {
-  source = "./modules/databricks_catalog_config"
+  source = "../databricks_workspace/modules/databricks_catalog_config"
 
   databricks_catalog_config = var.databricks_catalog_config
-  phase = "tables"
+  phase                     = "tables"
   cluster_ids = {
     for key, cluster in module.databricks_cluster : key => cluster.databricks_cluster_id
   }
 
   depends_on = [
-  module.databricks_catalog_config,
-  module.databricks_sample_data,
-  module.databricks_cluster,
-]
+    module.databricks_catalog_config,
+    module.databricks_sample_data,
+    module.databricks_cluster,
+  ]
 
   providers = {
     databricks.workspace = databricks.workspace
@@ -275,7 +180,7 @@ module "databricks_catalog_tables" {
 }
 
 module "databricks_sample_data" {
-  source = "./modules/databricks_sample_data"
+  source = "../databricks_workspace/modules/databricks_sample_data"
 
   databricks_catalog_config = var.databricks_catalog_config
 
@@ -305,7 +210,7 @@ module "databricks_sample_data" {
 ## - `azure_attributes`: Azure compute configurations for Databricks Clusters
 ## ---------------------------------------------------------------------------------------------------------------------
 module "databricks_cluster" {
-  source   = "./modules/databricks_cluster"
+  source   = "../databricks_workspace/modules/databricks_cluster"
   for_each = var.databricks_clusters
 
   depends_on = [module.databricks_catalog_config, module.databricks_artifact_allowlists]
@@ -336,11 +241,10 @@ module "databricks_cluster" {
 
 
 module "databricks_sql_warehouse" {
-  source   = "./modules/databricks_sql_warehouse"
+  source   = "../databricks_workspace/modules/databricks_sql_warehouse"
   for_each = var.databricks_sql_warehouses
 
-  # Wait for root-managed groups, workspace assignments, and entitlements before assigning permissions.
-  depends_on = [module.databricks_workspace_group, module.databricks_account_group]
+  # The caller must ensure referenced groups are assigned and ready in this workspace.
 
   warehouse_name = each.value.name
   config         = each.value
