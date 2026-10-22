@@ -159,7 +159,7 @@ module "databricks_account_group" {
   }
 
   account_group          = true
-  group_name             = each.key
+  group_name             = each.value.name
   members                = each.value.members
   workspace_assignments  = each.value.workspace_assignments
   workspace_entitlements = each.value.workspace_entitlements
