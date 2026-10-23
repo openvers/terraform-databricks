@@ -13,44 +13,8 @@ terraform {
 }
 
 locals {
-  workspace_ids_by_key = {
-    for entry in flatten([
-      for group in values(var.databricks_groups) : [
-        for workspace_key, assignment in group.workspace_assignments : {
-          workspace_key = workspace_key
-          workspace_id  = assignment.workspace_id
-        }
-      ]
-    ]) :
-    entry.workspace_key => entry.workspace_id...
-  }
-
-  default_admin_workspace_assignments = {
-    for workspace_key, workspace_ids in local.workspace_ids_by_key :
-    workspace_key => {
-      workspace_id = workspace_ids[0]
-      permission   = "ADMIN"
-    }
-  }
-
-  account_group_config = merge(
-    var.databricks_groups,
-    {
-      __default_admin = {
-        name = var.default_admin_group_name
-
-        members = {
-          default_service_principal = module.default_service_principal.databricks_service_principal_id
-        }
-
-        workspace_assignments  = local.default_admin_workspace_assignments
-        workspace_entitlements = null
-      }
-    }
-  )
-
   databricks_groups = {
-    for group_key, group in local.account_group_config :
+    for group_key, group in var.databricks_groups :
     group_key => merge(group, {
       group_id = module.databricks_account_group[group_key].databricks_group_id
     })
@@ -77,20 +41,10 @@ locals {
   }
 }
 
-module "default_service_principal" {
-  source = "../databricks_accounts/modules/databricks_service_principal"
-
-  display_name = var.default_service_principal_name
-
-  providers = {
-    databricks.accounts = databricks.accounts
-  }
-}
-
 module "databricks_account_group" {
   source = "../databricks_accounts/modules/databricks_group"
 
-  for_each = local.account_group_config
+  for_each = var.databricks_groups
 
   group_name = each.value.name
   members    = each.value.members

@@ -37,8 +37,8 @@ variable "databricks_groups" {
   }
 
   validation {
-    condition     = !contains(keys(var.databricks_groups), "__default_admin")
-    error_message = "The __default_admin group key is reserved for the module-managed default group."
+    condition     = contains(keys(var.databricks_groups), "admins")
+    error_message = "The admin group key is required for Metastore Ownership."
   }
 }
 
@@ -47,14 +47,3 @@ variable "databricks_groups" {
 ## These variables have defaults and may be overridden
 ## ---------------------------------------------------------------------------------------------------------------------
 
-variable "default_service_principal_name" {
-  description = "Display name of the default account service principal."
-  type        = string
-  default     = "terraform-default-service-principal"
-}
-
-variable "default_admin_group_name" {
-  description = "Display name of the default account group."
-  type        = string
-  default     = "terraform-default-admins"
-}
