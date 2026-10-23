@@ -26,6 +26,11 @@ output "databricks_sql_warehouse_ids" {
   }
 }
 
+output "databricks_unity_catalog_volume_storage_paths" {
+  description = "Configured external backing storage URIs keyed by JSON-encoded [logical catalog key, logical schema key, volume name]. Respects exact storage_path overrides; managed volumes have null entries, not their physical storage locations."
+  value       = module.databricks_catalog_config.databricks_volume_storage_paths
+}
+
 output "databricks_unity_catalog_volume_file_paths" {
   description = "Unity Catalog volume file paths keyed by JSON-encoded [logical catalog key, logical schema key] tuples."
   value       = module.databricks_catalog_config.databricks_volume_file_paths

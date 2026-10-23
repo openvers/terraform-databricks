@@ -64,6 +64,15 @@ locals {
     ]) : volume.key => volume
   }
 
+  volume_storage_paths = {
+    for volume_key, volume in local.storage_volumes :
+    volume_key => volume.volume_type == "MANAGED" ? null : (
+      volume.storage_path != null
+      ? volume.storage_path
+      : "${volume.storage_location}/volumes/${volume.volume_name}"
+    )
+  }
+
   # Keep a list to preserve volume-name/file-name ordering within each schema.
   storage_file_entries = flatten([
     for schema_resource_key, schema in local.storage_schemas : [
@@ -212,11 +221,7 @@ resource "databricks_volume" "this" {
   volume_type  = each.value.volume_type
   comment      = each.value.comment
 
-  storage_location = each.value.volume_type == "MANAGED" ? null : (
-    each.value.storage_path != null
-    ? each.value.storage_path
-    : "${each.value.storage_location}/volumes/${each.value.volume_name}"
-  )
+  storage_location = local.volume_storage_paths[each.key]
 }
 
 
