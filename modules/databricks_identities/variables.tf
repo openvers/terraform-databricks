@@ -35,11 +35,6 @@ variable "databricks_groups" {
     ]))
     error_message = "Workspace assignment permission must be USER or ADMIN."
   }
-
-  validation {
-    condition     = contains(keys(var.databricks_groups), "admins")
-    error_message = "The admin group key is required for Metastore Ownership."
-  }
 }
 
 ## ---------------------------------------------------------------------------------------------------------------------
